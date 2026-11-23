@@ -1,5 +1,9 @@
 # newznab-kotlin
 
+[![CI](https://github.com/skjaere/newznab-kotlin/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/skjaere/newznab-kotlin/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/skjaere/newznab-kotlin/branch/main/graph/badge.svg)](https://codecov.io/gh/skjaere/newznab-kotlin)
+[![](https://jitpack.io/v/skjaere/newznab-kotlin.svg)](https://jitpack.io/#skjaere/newznab-kotlin)
+
 A Kotlin client for Newznab indexers (Newznab, NNTmux, nZEDb, NZBHydra and Prowlarr) and Torznab indexers (Prowlarr,
 Jackett), with a DSL for searches. Built on Ktor's client and coroutines; it runs on the JVM and on Android.
 
