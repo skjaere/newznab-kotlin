@@ -18,7 +18,7 @@ import java.time.Instant
 import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.EmptyCoroutineContext
 
-/** Caps per indexer, kept for [ttl]. A failed fetch is not cached. */
+/** Caps per indexer, kept for [ttl]; those past it are let go of as new ones come. A failed fetch is not cached. */
 internal class CapsCache(
     private val api: IndexerApi,
     private val clock: Clock,
@@ -30,13 +30,21 @@ internal class CapsCache(
     suspend fun get(indexer: Indexer): IndexerCaps {
         kept(indexer)?.let { return it }
         val caps = api.caps(indexer)
-        mutex.withLock { entries[indexer.cacheKey()] = clock.instant() to caps }
+        mutex.withLock {
+            val now = clock.instant()
+            // Kept, but never given again: an indexer's old address, key or User-Agent.
+            entries.values.removeIf { (at, _) -> !at.plus(ttl).isAfter(now) }
+            entries[indexer.cacheKey()] = now to caps
+        }
         return caps
     }
 
     suspend fun invalidate(indexer: Indexer) {
         mutex.withLock { entries.remove(indexer.cacheKey()) }
     }
+
+    /** How many indexers' caps are kept, for tests. */
+    internal suspend fun keptCount(): Int = mutex.withLock { entries.size }
 
     /** [indexer]'s caps while they are kept, without asking for them; null once they would have to be asked for. */
     suspend fun kept(indexer: Indexer): IndexerCaps? =
@@ -77,6 +85,9 @@ internal class MultiIndexerSearch(
 
     /** Until when each indexer is kept out, by [limitKey]: it answered its limit with a Retry-After. */
     private val limited = HashMap<String, Instant>()
+
+    /** How many answers are kept, for tests. */
+    internal val keptAnswers: Int get() = synchronized(lock) { results.size }
 
     /** [plan] picks the query for each indexer from its caps. [fresh] asks every indexer again rather than reusing an answer. */
     fun search(indexers: List<Indexer>, fresh: Boolean, plan: (Indexer, IndexerCaps) -> Planned): Flow<IndexerOutcome> =
@@ -170,7 +181,13 @@ internal class MultiIndexerSearch(
                     holdOff(indexer, e.error)
                     throw e
                 }
-                synchronized(lock) { results[key] = clock.instant() to page }
+                synchronized(lock) {
+                    val now = clock.instant()
+                    // Answers past their time are never given again: let go of, or a server searching all day would
+                    // keep every one it was ever given.
+                    results.values.removeIf { (at, _) -> !at.plus(resultTtl).isAfter(now) }
+                    results[key] = now to page
+                }
                 page
             }.also { started ->
                 sent[key] = started

@@ -268,6 +268,40 @@ class MultiIndexerSearchTest {
         assertEquals(2, fake.requests.count { it.url.host == "bad.example" })
     }
 
+    @Test
+    fun `answers past their 15 minutes are let go of as new ones come, so a day of searches doesn't pile up`() =
+        runBlocking<Unit> {
+            var now = Instant.parse("2026-10-13T12:00:00Z")
+            val clock = object : Clock() {
+                override fun getZone() = ZoneOffset.UTC
+                override fun withZone(zone: java.time.ZoneId?) = this
+                override fun instant() = now
+            }
+            val multi = multiSearch(fake.api, clock = clock)
+            (1..4).forEach { show ->
+                multi.search(listOf(good), fresh = false, plan = planOf { SearchQuery.Tv(query = "Show $show") }).toList()
+                now = now.plus(Duration.ofMinutes(16))
+            }
+            assertEquals(4, fake.requests.count { it.url.parameters["t"] == "tvsearch" })
+            assertEquals(1, multi.keptAnswers, "only the last answer, gone by the next search")
+        }
+
+    @Test
+    fun `caps past their time are let go of as new ones come`() = runBlocking<Unit> {
+        var now = Instant.parse("2026-10-13T12:00:00Z")
+        val clock = object : Clock() {
+            override fun getZone() = ZoneOffset.UTC
+            override fun withZone(zone: java.time.ZoneId?) = this
+            override fun instant() = now
+        }
+        val cache = CapsCache(fake.api, clock, Duration.ofHours(24))
+        cache.get(good)
+        now = now.plus(Duration.ofHours(25))
+        // The same indexer under a new User-Agent: a new entry, the old one past its time.
+        cache.get(good.copy(userAgent = "Other/1.0"))
+        assertEquals(1, cache.keptCount())
+    }
+
     /**
      * An answer made with one User-Agent is never given for another, caps (kept 24 hours) and a search's answer (kept
      * 15 minutes) alike. The same value, padded or not, reuses both.
